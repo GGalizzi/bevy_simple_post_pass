@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+
 use bevy::{
     prelude::*,
     reflect::TypeUuid,
@@ -58,7 +59,7 @@ impl RenderToTextureGraphBuilder for RenderGraph {
         let mut pass_node = PassNode::<&FirstPass>::new(PassDescriptor {
             color_attachments: vec![RenderPassColorAttachmentDescriptor {
                 attachment: TextureAttachment::Input("color_attachment".to_string()),
-                resolve_target: None, // Some(TextureAttachment::Input("color_resolve_target".to_string())),
+                resolve_target: None,
                 ops: Operations {
                     load: LoadOp::Clear(Color::rgb(0.1, 0.2, 0.3)),
                     store: true,
@@ -80,13 +81,15 @@ impl RenderToTextureGraphBuilder for RenderGraph {
         self.add_system_node(FIRST_PASS_CAMERA, CameraNode::new(FIRST_PASS_CAMERA));
 
         active_cameras.add(FIRST_PASS_CAMERA);
-        self.add_node_edge(FIRST_PASS_CAMERA, FIRST_PASS).unwrap();
+        self
+            .add_node_edge(FIRST_PASS_CAMERA, FIRST_PASS)
+            .unwrap();
 
         self.add_node(
             TEXTURE_NODE,
             TextureNode::new(
                 TextureDescriptor {
-                    size: Extent3d::new(454, 454, 1),
+                    size: Extent3d::new(32, 32, 1),
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: TextureDimension::D2,
@@ -102,7 +105,7 @@ impl RenderToTextureGraphBuilder for RenderGraph {
             DEPTH_TEXTURE_NODE,
             TextureNode::new(
                 TextureDescriptor {
-                    size: Extent3d::new(454, 454, 1),
+                    size: Extent3d::new(32, 32, 1),
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: TextureDimension::D2,
@@ -114,25 +117,30 @@ impl RenderToTextureGraphBuilder for RenderGraph {
             ),
         );
 
-        self.add_node_edge(TEXTURE_NODE, FIRST_PASS).unwrap();
-        self.add_slot_edge(
-            TEXTURE_NODE,
-            TextureNode::TEXTURE,
-            FIRST_PASS,
-            "color_attachment",
-        )
-        .unwrap();
-        self.add_slot_edge(
-            DEPTH_TEXTURE_NODE,
-            TextureNode::TEXTURE,
-            FIRST_PASS,
-            "depth",
-        )
-        .unwrap();
+        self
+            .add_node_edge(TEXTURE_NODE, FIRST_PASS)
+            .unwrap();
+        self
+            .add_slot_edge(
+                TEXTURE_NODE,
+                TextureNode::TEXTURE,
+                FIRST_PASS,
+                "color_attachment",
+            )
+            .unwrap();
+        self
+            .add_slot_edge(
+                DEPTH_TEXTURE_NODE,
+                TextureNode::TEXTURE,
+                FIRST_PASS,
+                "depth",
+            )
+            .unwrap();
         self.add_node_edge(FIRST_PASS, MAIN_PASS).unwrap();
         self.add_node_edge("transform", FIRST_PASS).unwrap();
         self
     }
+
 }
 
 /// this component indicates what entities should rotate
@@ -145,8 +153,8 @@ pub struct FirstPass;
 /// rotates the inner cube (first pass)
 fn rotator_system(time: Res<Time>, mut query: Query<&mut Transform, With<Rotator>>) {
     for mut transform in query.iter_mut() {
-        transform.translation +=
-            Vec3::new(time.delta_seconds() * 20.0, time.delta_seconds() * 2.0, 1.0);
+        transform.rotation *= Quat::from_rotation_x(1.5 * time.delta_seconds());
+        transform.rotation *= Quat::from_rotation_z(1.3 * time.delta_seconds());
     }
 }
 /// rotates the outer cube (main pass)
@@ -159,48 +167,82 @@ fn cube_rotator_system(time: Res<Time>, mut query: Query<&mut Transform, With<Cu
 
 fn setup(
     commands: &mut Commands,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    asset_server: Res<AssetServer>,
-    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let atlas_texture_handle = asset_server.load("textures/atlas.png");
-    let texture_atlas = TextureAtlas::from_grid(atlas_texture_handle.clone(), Vec2::new(24.0, 24.0), 19, 19);
-    let atlas_handle = texture_atlases.add(texture_atlas);
+    let cube_handle = meshes.add(Mesh::from(shape::Cube { size: 4.0 }));
+    let cube_material_handle = materials.add(StandardMaterial {
+        albedo: Color::rgb(0.8, 0.7, 0.6),
+        ..Default::default()
+    });
 
     commands
-        .spawn(SpriteSheetBundle {
-            texture_atlas: atlas_handle,
+        .spawn(PbrBundle {
+            mesh: cube_handle.clone(),
+            material: cube_material_handle.clone(),
             transform: Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
-            sprite: TextureAtlasSprite {
-                index: 19 * 2 + 5,
-                ..Default::default()
-            },
             ..Default::default()
         })
         .with(Rotator)
         .with(FirstPass);
     commands.remove_one::<MainPass>(commands.current_entity().unwrap());
+    // light
+    commands
+        .spawn(LightBundle {
+            transform: Transform::from_translation(Vec3::new(4.0, 10.0, 10.0)),
+            ..Default::default()
+        });
+        // camera
 
-    let first_pass_camera = OrthographicCameraBundle {
+    let mut first_pass_camera = PerspectiveCameraBundle {
         camera: Camera {
             name: Some(FIRST_PASS_CAMERA.to_string()),
+            window: WindowId::new(), // otherwise it will use main window size / aspect for calculation of projection matrix
             ..Default::default()
         },
-        ..OrthographicCameraBundle::new_2d()
+        transform: Transform::from_translation(Vec3::new(0.0, 0.0, 15.0))
+            .looking_at(Vec3::default(), Vec3::unit_y()),
+        ..Default::default()
     };
+    first_pass_camera.camera.window = WindowId::new();
+    let camera_projection = &mut first_pass_camera.perspective_projection;
+    camera_projection.update(512.0, 512.0);
+    first_pass_camera.camera.projection_matrix = camera_projection.get_projection_matrix();
+    first_pass_camera.camera.depth_calculation = camera_projection.depth_calculation();
 
     commands.spawn(first_pass_camera);
 
     let texture_handle = RENDER_TEXTURE_HANDLE.typed();
 
+    let cube_size = 4.0;
+    let cube_handle = meshes.add(Mesh::from(shape::Box::new(cube_size, cube_size, cube_size)));
+
+    let material_handle = materials.add(StandardMaterial {
+        albedo_texture: Some(texture_handle.clone()),
+        ..Default::default()
+    });
+
     // add entities to the world
     commands
-        .spawn(SpriteBundle {
-            material: materials.add(texture_handle.into()),
-            transform: Transform::from_translation(Vec3::new(00.0, 90.0, 1.0)),
+        .spawn(PbrBundle {
+            mesh: cube_handle.clone(),
+            material: material_handle,
+            transform: Transform {
+                translation: Vec3::new(0.0, 0.0, 1.5),
+                rotation: Quat::from_rotation_x(-std::f32::consts::PI / 5.0),
+                ..Default::default()
+            },
+            visible: Visible {
+                is_transparent: true,
+                ..Default::default()
+            },
             ..Default::default()
         })
-        .spawn(OrthographicCameraBundle::new_2d());
+        .spawn(PerspectiveCameraBundle {
+            transform: Transform::from_translation(Vec3::new(0.0, 0.0, 15.0))
+                .looking_at(Vec3::default(), Vec3::unit_y()),
+            ..Default::default()
+        });
 }
 
 pub struct TextureNode {
@@ -243,7 +285,6 @@ impl Node for TextureNode {
         output: &mut bevy::render::render_graph::ResourceSlots,
     ) {
         if output.get(0).is_none() {
-            println!("happenin");
             let render_resource_context = render_context.resources_mut();
             let texture_id = render_resource_context.create_texture(self.texture_descriptor);
             if let Some(handle) = &self.handle {
@@ -253,7 +294,8 @@ impl Node for TextureNode {
                     TEXTURE_ASSET_INDEX,
                 );
                 if let Some(sampler_descriptor) = self.sampler_descriptor {
-                    let sampler_id = render_resource_context.create_sampler(&sampler_descriptor);
+                    let sampler_id =
+                        render_resource_context.create_sampler(&sampler_descriptor);
                     render_resource_context.set_asset_resource_untyped(
                         handle.clone(),
                         RenderResourceId::Sampler(sampler_id),
