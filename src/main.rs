@@ -89,7 +89,7 @@ impl RenderToTextureGraphBuilder for RenderGraph {
             TEXTURE_NODE,
             TextureNode::new(
                 TextureDescriptor {
-                    size: Extent3d::new(32, 32, 1),
+                    size: Extent3d::new(512, 512, 1),
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: TextureDimension::D2,
@@ -105,7 +105,7 @@ impl RenderToTextureGraphBuilder for RenderGraph {
             DEPTH_TEXTURE_NODE,
             TextureNode::new(
                 TextureDescriptor {
-                    size: Extent3d::new(32, 32, 1),
+                    size: Extent3d::new(512, 512, 1),
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: TextureDimension::D2,
@@ -194,19 +194,16 @@ fn setup(
         });
         // camera
 
-    let mut first_pass_camera = PerspectiveCameraBundle {
+    let mut first_pass_camera = OrthographicCameraBundle {
         camera: Camera {
             name: Some(FIRST_PASS_CAMERA.to_string()),
             window: WindowId::new(), // otherwise it will use main window size / aspect for calculation of projection matrix
             ..Default::default()
         },
-        transform: Transform::from_translation(Vec3::new(0.0, 0.0, 15.0))
-            .looking_at(Vec3::default(), Vec3::unit_y()),
-        ..Default::default()
+        ..OrthographicCameraBundle::new_2d()
     };
-    first_pass_camera.camera.window = WindowId::new();
-    let camera_projection = &mut first_pass_camera.perspective_projection;
-    camera_projection.update(512.0, 512.0);
+    let camera_projection = &mut first_pass_camera.orthographic_projection;
+    camera_projection.update(28.0, 28.0);
     first_pass_camera.camera.projection_matrix = camera_projection.get_projection_matrix();
     first_pass_camera.camera.depth_calculation = camera_projection.depth_calculation();
 
