@@ -1,10 +1,6 @@
 use std::borrow::Cow;
 
-
-use bevy::{
-    prelude::*,
-    reflect::TypeUuid,
-    render::{
+use bevy::{prelude::*, reflect::TypeUuid, render::{
         camera::{ActiveCameras, Camera, CameraProjection},
         pass::{
             LoadOp, Operations, PassDescriptor, RenderPassColorAttachmentDescriptor,
@@ -19,9 +15,7 @@ use bevy::{
             Extent3d, SamplerDescriptor, TextureDescriptor, TextureDimension, TextureFormat,
             TextureUsage, SAMPLER_ASSET_INDEX, TEXTURE_ASSET_INDEX,
         },
-    },
-    window::WindowId,
-};
+    }, sprite::node::{COLOR_MATERIAL, SPRITE}, window::WindowId};
 
 pub const RENDER_TEXTURE_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Texture::TYPE_UUID, 13378939762009864029);
@@ -61,7 +55,7 @@ impl RenderToTextureGraphBuilder for RenderGraph {
                 attachment: TextureAttachment::Input("color_attachment".to_string()),
                 resolve_target: None,
                 ops: Operations {
-                    load: LoadOp::Clear(Color::rgb(0.1, 0.2, 0.3)),
+                    load: LoadOp::Clear(Color::rgb(1.0, 0.0, 1.0)),
                     store: true,
                 },
             }],
@@ -81,9 +75,7 @@ impl RenderToTextureGraphBuilder for RenderGraph {
         self.add_system_node(FIRST_PASS_CAMERA, CameraNode::new(FIRST_PASS_CAMERA));
 
         active_cameras.add(FIRST_PASS_CAMERA);
-        self
-            .add_node_edge(FIRST_PASS_CAMERA, FIRST_PASS)
-            .unwrap();
+        self.add_node_edge(FIRST_PASS_CAMERA, FIRST_PASS).unwrap();
 
         self.add_node(
             TEXTURE_NODE,
@@ -117,30 +109,26 @@ impl RenderToTextureGraphBuilder for RenderGraph {
             ),
         );
 
-        self
-            .add_node_edge(TEXTURE_NODE, FIRST_PASS)
-            .unwrap();
-        self
-            .add_slot_edge(
-                TEXTURE_NODE,
-                TextureNode::TEXTURE,
-                FIRST_PASS,
-                "color_attachment",
-            )
-            .unwrap();
-        self
-            .add_slot_edge(
-                DEPTH_TEXTURE_NODE,
-                TextureNode::TEXTURE,
-                FIRST_PASS,
-                "depth",
-            )
-            .unwrap();
+
+        self.add_node_edge(TEXTURE_NODE, FIRST_PASS).unwrap();
+        self.add_slot_edge(
+            TEXTURE_NODE,
+            TextureNode::TEXTURE,
+            FIRST_PASS,
+            "color_attachment",
+        )
+        .unwrap();
+        self.add_slot_edge(
+            DEPTH_TEXTURE_NODE,
+            TextureNode::TEXTURE,
+            FIRST_PASS,
+            "depth",
+        )
+        .unwrap();
         self.add_node_edge(FIRST_PASS, MAIN_PASS).unwrap();
-        self.add_node_edge("transform", FIRST_PASS).unwrap();
+        // self.add_node_edge("transform", FIRST_PASS).unwrap();
         self
     }
-
 }
 
 /// this component indicates what entities should rotate
@@ -169,12 +157,16 @@ fn setup(
     commands: &mut Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut color_materials: ResMut<Assets<ColorMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
     let cube_handle = meshes.add(Mesh::from(shape::Cube { size: 4.0 }));
     let cube_material_handle = materials.add(StandardMaterial {
-        albedo: Color::rgb(0.8, 0.7, 0.6),
+        albedo: Color::rgb(0., 1., 1.),
         ..Default::default()
     });
+
+    let atlas_texture_handle: Handle<Texture> = asset_server.load("textures/atlas.png");
 
     commands
         .spawn(PbrBundle {
@@ -187,13 +179,12 @@ fn setup(
         .with(FirstPass);
     commands.remove_one::<MainPass>(commands.current_entity().unwrap());
     // light
-    commands
-        .spawn(LightBundle {
-            transform: Transform::from_translation(Vec3::new(4.0, 10.0, 10.0)),
-            ..Default::default()
-        });
-        // camera
+    commands.spawn(LightBundle {
+        transform: Transform::from_translation(Vec3::new(4.0, 10.0, 10.0)),
+        ..Default::default()
+    });
 
+    // camera
     let mut first_pass_camera = OrthographicCameraBundle {
         camera: Camera {
             name: Some(FIRST_PASS_CAMERA.to_string()),
@@ -205,14 +196,22 @@ fn setup(
     let camera_projection = &mut first_pass_camera.orthographic_projection;
     camera_projection.update(28.0, 28.0);
     first_pass_camera.camera.projection_matrix = camera_projection.get_projection_matrix();
-    first_pass_camera.camera.depth_calculation = camera_projection.depth_calculation();
+    // first_pass_camera.camera.depth_calculation = camera_projection.depth_calculation();
 
     commands.spawn(first_pass_camera);
 
     let texture_handle = RENDER_TEXTURE_HANDLE.typed();
 
-    let cube_size = 4.0;
+    let cube_size = 88.0;
     let cube_handle = meshes.add(Mesh::from(shape::Box::new(cube_size, cube_size, cube_size)));
+
+    let quad_mesh_handle = meshes.add(Mesh::from(shape::Quad::new(Vec2::splat(52.0))));
+
+    let sprite_mat = ColorMaterial {
+        color: Color::VIOLET,
+        // texture: Some(atlas_texture_handle.clone()),
+        texture: Some(texture_handle.clone()),
+    };
 
     let material_handle = materials.add(StandardMaterial {
         albedo_texture: Some(texture_handle.clone()),
@@ -221,12 +220,12 @@ fn setup(
 
     // add entities to the world
     commands
-        .spawn(PbrBundle {
+         .spawn(PbrBundle {
             mesh: cube_handle.clone(),
             material: material_handle,
             transform: Transform {
                 translation: Vec3::new(0.0, 0.0, 1.5),
-                rotation: Quat::from_rotation_x(-std::f32::consts::PI / 5.0),
+                rotation: Quat::from_rotation_x(-std::f32::consts::PI / 6.0),
                 ..Default::default()
             },
             visible: Visible {
@@ -235,10 +234,17 @@ fn setup(
             },
             ..Default::default()
         })
-        .spawn(PerspectiveCameraBundle {
-            transform: Transform::from_translation(Vec3::new(0.0, 0.0, 15.0))
-                .looking_at(Vec3::default(), Vec3::unit_y()),
+        .spawn(SpriteBundle {
+            material: color_materials.add(sprite_mat),
+            transform: Transform::from_xyz(-55.0, 50.0, 0.7),
+            visible: Visible {
+                is_transparent: true,
+                ..Default::default()
+            },
             ..Default::default()
+        })
+        .spawn(OrthographicCameraBundle {
+            ..OrthographicCameraBundle::new_2d()
         });
 }
 
@@ -249,7 +255,7 @@ pub struct TextureNode {
 }
 
 impl TextureNode {
-    pub const TEXTURE: &'static str = "texture";
+    pub const TEXTURE: &'static str = "btexture";
 
     pub fn new(
         texture_descriptor: TextureDescriptor,
@@ -285,14 +291,14 @@ impl Node for TextureNode {
             let render_resource_context = render_context.resources_mut();
             let texture_id = render_resource_context.create_texture(self.texture_descriptor);
             if let Some(handle) = &self.handle {
+                println!("handle yes");
                 render_resource_context.set_asset_resource_untyped(
                     handle.clone(),
                     RenderResourceId::Texture(texture_id),
                     TEXTURE_ASSET_INDEX,
                 );
                 if let Some(sampler_descriptor) = self.sampler_descriptor {
-                    let sampler_id =
-                        render_resource_context.create_sampler(&sampler_descriptor);
+                    let sampler_id = render_resource_context.create_sampler(&sampler_descriptor);
                     render_resource_context.set_asset_resource_untyped(
                         handle.clone(),
                         RenderResourceId::Sampler(sampler_id),
