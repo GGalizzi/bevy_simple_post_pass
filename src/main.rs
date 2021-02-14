@@ -1,13 +1,17 @@
 use std::borrow::Cow;
 
-use bevy::{prelude::*, reflect::TypeUuid, render::{
+use bevy::{
+    prelude::*,
+    reflect::TypeUuid,
+    render::{
         camera::{ActiveCameras, Camera, CameraProjection},
+        color,
         pass::{
             LoadOp, Operations, PassDescriptor, RenderPassColorAttachmentDescriptor,
             RenderPassDepthStencilAttachmentDescriptor, TextureAttachment,
         },
         render_graph::{
-            base::{node::MAIN_PASS, MainPass},
+            base::{node::MAIN_PASS, BaseRenderGraphConfig, MainPass},
             CameraNode, Node, PassNode, RenderGraph, ResourceSlotInfo,
         },
         renderer::{RenderResourceId, RenderResourceType},
@@ -15,7 +19,11 @@ use bevy::{prelude::*, reflect::TypeUuid, render::{
             Extent3d, SamplerDescriptor, TextureDescriptor, TextureDimension, TextureFormat,
             TextureUsage, SAMPLER_ASSET_INDEX, TEXTURE_ASSET_INDEX,
         },
-    }, sprite::node::{COLOR_MATERIAL, SPRITE}, window::WindowId};
+    },
+    sprite::node::{COLOR_MATERIAL, SPRITE},
+    window::WindowId,
+};
+use stage::FIRST;
 
 pub const RENDER_TEXTURE_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Texture::TYPE_UUID, 13378939762009864029);
@@ -29,7 +37,31 @@ fn main() {
     let mut app = App::build();
     app
         // .add_resource(Msaa { samples: 1 })
-        .add_plugins(DefaultPlugins)
+        .add_plugin(bevy::log::LogPlugin::default())
+        .add_plugin(bevy::reflect::ReflectPlugin::default())
+        .add_plugin(bevy::core::CorePlugin::default())
+        .add_plugin(TransformPlugin::default())
+        .add_plugin(bevy::diagnostic::DiagnosticsPlugin::default())
+        .add_plugin(bevy::input::InputPlugin::default())
+        .add_plugin(bevy::window::WindowPlugin::default())
+        .add_plugin(bevy::asset::AssetPlugin::default())
+        .add_plugin(bevy::scene::ScenePlugin::default())
+        .add_plugin(bevy::render::RenderPlugin {
+            base_render_graph_config: Some(BaseRenderGraphConfig {
+                connect_main_pass_to_swapchain: false,
+                connect_main_pass_to_main_depth_texture: false,
+                ..Default::default()
+            }),
+        })
+        .add_plugin(bevy::sprite::SpritePlugin::default())
+        .add_plugin(bevy::pbr::PbrPlugin::default())
+        .add_plugin(bevy::ui::UiPlugin::default())
+        .add_plugin(bevy::text::TextPlugin::default())
+        .add_plugin(bevy::audio::AudioPlugin::default())
+        .add_plugin(GilrsPlugin::default())
+        .add_plugin(bevy::gltf::GltfPlugin::default())
+        .add_plugin(bevy::winit::WinitPlugin::default())
+        .add_plugin(bevy::wgpu::WgpuPlugin::default())
         .add_startup_system(setup.system())
         .add_system(cube_rotator_system.system())
         .add_system(rotator_system.system());
@@ -81,7 +113,7 @@ impl RenderToTextureGraphBuilder for RenderGraph {
             TEXTURE_NODE,
             TextureNode::new(
                 TextureDescriptor {
-                    size: Extent3d::new(512, 512, 1),
+                    size: Extent3d::new(1280, 720, 1),
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: TextureDimension::D2,
@@ -97,7 +129,7 @@ impl RenderToTextureGraphBuilder for RenderGraph {
             DEPTH_TEXTURE_NODE,
             TextureNode::new(
                 TextureDescriptor {
-                    size: Extent3d::new(512, 512, 1),
+                    size: Extent3d::new(1280, 720, 1),
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: TextureDimension::D2,
@@ -109,23 +141,32 @@ impl RenderToTextureGraphBuilder for RenderGraph {
             ),
         );
 
-
-        self.add_node_edge(TEXTURE_NODE, FIRST_PASS).unwrap();
+        self.add_node_edge(TEXTURE_NODE, MAIN_PASS).unwrap();
         self.add_slot_edge(
             TEXTURE_NODE,
             TextureNode::TEXTURE,
+            MAIN_PASS,
+            "color_attachment",
+        )
+        .unwrap();
+        self.add_slot_edge(DEPTH_TEXTURE_NODE, TextureNode::TEXTURE, MAIN_PASS, "depth")
+            .unwrap();
+
+        self.add_node_edge(MAIN_PASS, FIRST_PASS).unwrap();
+        self.add_slot_edge(
+            bevy::render::render_graph::base::node::PRIMARY_SWAP_CHAIN,
+            bevy::render::render_graph::WindowSwapChainNode::OUT_TEXTURE,
             FIRST_PASS,
             "color_attachment",
         )
         .unwrap();
         self.add_slot_edge(
-            DEPTH_TEXTURE_NODE,
-            TextureNode::TEXTURE,
+            bevy::render::render_graph::base::node::MAIN_DEPTH_TEXTURE,
+            bevy::render::render_graph::WindowTextureNode::OUT_TEXTURE,
             FIRST_PASS,
             "depth",
         )
         .unwrap();
-        self.add_node_edge(FIRST_PASS, MAIN_PASS).unwrap();
         // self.add_node_edge("transform", FIRST_PASS).unwrap();
         self
     }
@@ -168,35 +209,26 @@ fn setup(
 
     let atlas_texture_handle: Handle<Texture> = asset_server.load("textures/atlas.png");
 
-    commands
-        .spawn(PbrBundle {
-            mesh: cube_handle.clone(),
-            material: cube_material_handle.clone(),
-            transform: Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
-            ..Default::default()
-        })
-        .with(Rotator)
-        .with(FirstPass);
-    commands.remove_one::<MainPass>(commands.current_entity().unwrap());
-    // light
+    /*/ light
     commands.spawn(LightBundle {
         transform: Transform::from_translation(Vec3::new(4.0, 10.0, 10.0)),
         ..Default::default()
-    });
+    });*/
 
     // camera
     let mut first_pass_camera = OrthographicCameraBundle {
         camera: Camera {
             name: Some(FIRST_PASS_CAMERA.to_string()),
-            window: WindowId::new(), // otherwise it will use main window size / aspect for calculation of projection matrix
             ..Default::default()
         },
         ..OrthographicCameraBundle::new_2d()
     };
+    /*/
     let camera_projection = &mut first_pass_camera.orthographic_projection;
     camera_projection.update(28.0, 28.0);
     first_pass_camera.camera.projection_matrix = camera_projection.get_projection_matrix();
-    // first_pass_camera.camera.depth_calculation = camera_projection.depth_calculation();
+    first_pass_camera.camera.depth_calculation = camera_projection.depth_calculation();
+    */
 
     commands.spawn(first_pass_camera);
 
@@ -209,8 +241,8 @@ fn setup(
 
     let sprite_mat = ColorMaterial {
         color: Color::VIOLET,
-        // texture: Some(atlas_texture_handle.clone()),
-        texture: Some(texture_handle.clone()),
+        texture: Some(atlas_texture_handle.clone()),
+        // texture: Some(texture_handle.clone()),
     };
 
     let material_handle = materials.add(StandardMaterial {
@@ -220,7 +252,7 @@ fn setup(
 
     // add entities to the world
     commands
-         .spawn(PbrBundle {
+        /*.spawn(PbrBundle {
             mesh: cube_handle.clone(),
             material: material_handle,
             transform: Transform {
@@ -233,10 +265,10 @@ fn setup(
                 ..Default::default()
             },
             ..Default::default()
-        })
+        })*/
         .spawn(SpriteBundle {
             material: color_materials.add(sprite_mat),
-            transform: Transform::from_xyz(-55.0, 50.0, 0.7),
+            transform: Transform::from_xyz(0., 50.0, 0.7),
             visible: Visible {
                 is_transparent: true,
                 ..Default::default()
@@ -246,6 +278,15 @@ fn setup(
         .spawn(OrthographicCameraBundle {
             ..OrthographicCameraBundle::new_2d()
         });
+
+    commands
+        .spawn(SpriteBundle {
+            material: color_materials.add(texture_handle.clone().into()),
+            transform: Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
+            ..Default::default()
+        })
+        .with(FirstPass);
+    commands.remove_one::<MainPass>(commands.current_entity().unwrap());
 }
 
 pub struct TextureNode {
