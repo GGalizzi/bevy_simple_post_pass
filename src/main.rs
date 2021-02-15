@@ -5,25 +5,29 @@ use bevy::{
     reflect::TypeUuid,
     render::{
         camera::{ActiveCameras, Camera, CameraProjection},
-        color,
         pass::{
             LoadOp, Operations, PassDescriptor, RenderPassColorAttachmentDescriptor,
             RenderPassDepthStencilAttachmentDescriptor, TextureAttachment,
+        },
+        pipeline::{
+            BlendFactor, BlendOperation, BlendState, ColorTargetState, ColorWrite, CompareFunction,
+            CullMode, DepthBiasState, DepthStencilState, FrontFace, PipelineDescriptor,
+            PolygonMode, PrimitiveState, PrimitiveTopology, RenderPipeline, StencilFaceState,
+            StencilState,
         },
         render_graph::{
             base::{node::MAIN_PASS, BaseRenderGraphConfig, MainPass},
             CameraNode, Node, PassNode, RenderGraph, ResourceSlotInfo,
         },
         renderer::{RenderResourceId, RenderResourceType},
+        shader::{ShaderStage, ShaderStages},
         texture::{
             Extent3d, SamplerDescriptor, TextureDescriptor, TextureDimension, TextureFormat,
             TextureUsage, SAMPLER_ASSET_INDEX, TEXTURE_ASSET_INDEX,
         },
     },
-    sprite::node::{COLOR_MATERIAL, SPRITE},
     window::WindowId,
 };
-use stage::FIRST;
 
 pub const RENDER_TEXTURE_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Texture::TYPE_UUID, 13378939762009864029);
@@ -33,10 +37,70 @@ pub const DEPTH_TEXTURE_NODE: &str = "depth_texure_node";
 pub const FIRST_PASS: &str = "first_pass";
 pub const FIRST_PASS_CAMERA: &str = "first_pass_camera";
 
+const FRAGMENT_SHADER: &str = r#"
+#version 450
+
+layout(location = 0) in vec2 v_Uv;
+layout(location = 1) in vec4 gl_FragCoord;
+
+layout(location = 0) out vec4 o_Target;
+
+layout(set = 1, binding = 0) uniform ColorMaterial_color {
+    vec4 Color;
+};
+
+layout(set = 1, binding = 1) uniform texture2D ColorMaterial_texture;
+layout(set = 1, binding = 2) uniform sampler ColorMaterial_texture_sampler;
+
+void main() {
+    vec4 color = Color;
+
+    vec4 sampled_color = texture(
+        sampler2D(ColorMaterial_texture, ColorMaterial_texture_sampler),
+        v_Uv);
+
+    float rem = mod(gl_FragCoord.y, 5.0);
+    if (rem >= 0.0 && rem <= 1.1) {
+        sampled_color += vec4(0.005, 0.005, 0.005, 0.0);
+    }
+
+    color *= sampled_color;
+    o_Target = color;
+}
+"#;
+
+const VERTEX_SHADER: &str = r#"
+#version 450
+
+layout(location = 0) in vec3 Vertex_Position;
+layout(location = 1) in vec3 Vertex_Normal;
+layout(location = 2) in vec2 Vertex_Uv;
+
+layout(location = 0) out vec2 v_Uv;
+
+layout(set = 0, binding = 0) uniform Camera {
+    mat4 ViewProj;
+};
+
+layout(set = 2, binding = 0) uniform Transform {
+    mat4 Model;
+};
+layout(set = 2, binding = 1) uniform Sprite_size {
+    vec2 size;
+};
+
+void main() {
+    v_Uv = Vertex_Uv;
+    vec3 position = Vertex_Position * vec3(size, 1.0);
+    gl_Position = ViewProj * Model * vec4(position, 1.0);
+}
+"#;
+
 fn main() {
     let mut app = App::build();
     app
         // .add_resource(Msaa { samples: 1 })
+        .insert_resource(ClearColor(Color::rgb(0.025, 0.0, 0.035)))
         .add_plugin(bevy::log::LogPlugin::default())
         .add_plugin(bevy::reflect::ReflectPlugin::default())
         .add_plugin(bevy::core::CorePlugin::default())
@@ -189,25 +253,22 @@ fn rotator_system(time: Res<Time>, mut query: Query<&mut Transform, With<Rotator
 /// rotates the outer cube (main pass)
 fn cube_rotator_system(time: Res<Time>, mut query: Query<&mut Transform, With<Cube>>) {
     for mut transform in query.iter_mut() {
-        transform.rotation *= Quat::from_rotation_x(1.0 * time.delta_seconds());
-        transform.rotation *= Quat::from_rotation_y(0.7 * time.delta_seconds());
+        transform.translation.x += 10.0 * time.delta_seconds();
     }
 }
 
 fn setup(
     commands: &mut Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     mut color_materials: ResMut<Assets<ColorMaterial>>,
     asset_server: Res<AssetServer>,
+    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
+    mut pipelines: ResMut<Assets<PipelineDescriptor>>,
+    mut shaders: ResMut<Assets<Shader>>,
 ) {
-    let cube_handle = meshes.add(Mesh::from(shape::Cube { size: 4.0 }));
-    let cube_material_handle = materials.add(StandardMaterial {
-        albedo: Color::rgb(0., 1., 1.),
-        ..Default::default()
-    });
-
     let atlas_texture_handle: Handle<Texture> = asset_server.load("textures/atlas.png");
+    let texture_atlas =
+        TextureAtlas::from_grid(atlas_texture_handle.clone(), Vec2::new(24.0, 24.0), 19, 19);
+    let atlas_handle = texture_atlases.add(texture_atlas);
 
     /*/ light
     commands.spawn(LightBundle {
@@ -215,78 +276,109 @@ fn setup(
         ..Default::default()
     });*/
 
+    let mut cam_trans = Transform::default();
+    cam_trans.rotate(Quat::from_rotation_y(std::f32::consts::PI));
     // camera
     let mut first_pass_camera = OrthographicCameraBundle {
         camera: Camera {
             name: Some(FIRST_PASS_CAMERA.to_string()),
+            window: WindowId::new(),
             ..Default::default()
         },
+        transform: cam_trans,
         ..OrthographicCameraBundle::new_2d()
     };
-    /*/
     let camera_projection = &mut first_pass_camera.orthographic_projection;
-    camera_projection.update(28.0, 28.0);
+    camera_projection.update(1280.0, 720.0);
     first_pass_camera.camera.projection_matrix = camera_projection.get_projection_matrix();
     first_pass_camera.camera.depth_calculation = camera_projection.depth_calculation();
-    */
 
     commands.spawn(first_pass_camera);
 
     let texture_handle = RENDER_TEXTURE_HANDLE.typed();
 
-    let cube_size = 88.0;
-    let cube_handle = meshes.add(Mesh::from(shape::Box::new(cube_size, cube_size, cube_size)));
-
-    let quad_mesh_handle = meshes.add(Mesh::from(shape::Quad::new(Vec2::splat(52.0))));
-
-    let sprite_mat = ColorMaterial {
-        color: Color::VIOLET,
-        texture: Some(atlas_texture_handle.clone()),
-        // texture: Some(texture_handle.clone()),
-    };
-
-    let material_handle = materials.add(StandardMaterial {
-        albedo_texture: Some(texture_handle.clone()),
-        ..Default::default()
-    });
-
     // add entities to the world
     commands
-        /*.spawn(PbrBundle {
-            mesh: cube_handle.clone(),
-            material: material_handle,
-            transform: Transform {
-                translation: Vec3::new(0.0, 0.0, 1.5),
-                rotation: Quat::from_rotation_x(-std::f32::consts::PI / 6.0),
+        .spawn(SpriteSheetBundle {
+            texture_atlas: atlas_handle,
+            sprite: TextureAtlasSprite {
+                index: 19 * 2 + 5,
                 ..Default::default()
             },
-            visible: Visible {
-                is_transparent: true,
-                ..Default::default()
-            },
-            ..Default::default()
-        })*/
-        .spawn(SpriteBundle {
-            material: color_materials.add(sprite_mat),
-            transform: Transform::from_xyz(0., 50.0, 0.7),
-            visible: Visible {
-                is_transparent: true,
-                ..Default::default()
-            },
+            transform: Transform::from_scale(Vec3::splat(3.0)),
             ..Default::default()
         })
+        .with(Cube)
         .spawn(OrthographicCameraBundle {
             ..OrthographicCameraBundle::new_2d()
         });
 
+    // Final pass
+
+    let pipeline_handle = pipelines.add(build_sprite_pipeline(ShaderStages {
+        vertex: shaders.add(Shader::from_glsl(ShaderStage::Vertex, VERTEX_SHADER)),
+        fragment: Some(shaders.add(Shader::from_glsl(ShaderStage::Fragment, FRAGMENT_SHADER))),
+    }));
+
     commands
         .spawn(SpriteBundle {
+            sprite: Sprite {
+                size: Vec2::new(1280., 720.),
+                ..Default::default()
+            },
             material: color_materials.add(texture_handle.clone().into()),
             transform: Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
+            render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
+                pipeline_handle,
+            )]),
             ..Default::default()
         })
         .with(FirstPass);
     commands.remove_one::<MainPass>(commands.current_entity().unwrap());
+}
+
+pub fn build_sprite_pipeline(shader_stages: ShaderStages) -> PipelineDescriptor {
+    PipelineDescriptor {
+        depth_stencil: Some(DepthStencilState {
+            format: TextureFormat::Depth32Float,
+            depth_write_enabled: true,
+            depth_compare: CompareFunction::LessEqual,
+            stencil: StencilState {
+                front: StencilFaceState::IGNORE,
+                back: StencilFaceState::IGNORE,
+                read_mask: 0,
+                write_mask: 0,
+            },
+            bias: DepthBiasState {
+                constant: 0,
+                slope_scale: 0.0,
+                clamp: 0.0,
+            },
+            clamp_depth: false,
+        }),
+        color_target_states: vec![ColorTargetState {
+            format: TextureFormat::default(),
+            color_blend: BlendState {
+                src_factor: BlendFactor::SrcAlpha,
+                dst_factor: BlendFactor::OneMinusSrcAlpha,
+                operation: BlendOperation::Add,
+            },
+            alpha_blend: BlendState {
+                src_factor: BlendFactor::One,
+                dst_factor: BlendFactor::One,
+                operation: BlendOperation::Add,
+            },
+            write_mask: ColorWrite::ALL,
+        }],
+        primitive: PrimitiveState {
+            topology: PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: FrontFace::Ccw,
+            cull_mode: CullMode::None,
+            polygon_mode: PolygonMode::Fill,
+        },
+        ..PipelineDescriptor::new(shader_stages)
+    }
 }
 
 pub struct TextureNode {
