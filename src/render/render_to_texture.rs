@@ -16,11 +16,11 @@ use bevy::{
 
 pub use super::{TextureNode, DEPTH_TEXTURE_NODE, RENDER_TEXTURE_HANDLE, TEXTURE_NODE};
 
-pub const FIRST_PASS: &str = "first_pass";
-pub const FIRST_PASS_CAMERA: &str = "first_pass_camera";
+pub const POST_PASS: &str = "post_pass";
+pub const POST_PASS_CAMERA: &str = "post_pass_camera";
 
 #[derive(Default)]
-pub struct FirstPass;
+pub struct PostPass;
 
 pub trait RenderToTextureGraphBuilder {
     fn add_render_to_texture_graph(&mut self, resources: &Resources) -> &mut Self;
@@ -30,7 +30,7 @@ impl RenderToTextureGraphBuilder for RenderGraph {
     fn add_render_to_texture_graph(&mut self, resources: &Resources) -> &mut Self {
         let mut active_cameras = resources.get_mut::<ActiveCameras>().unwrap();
 
-        let mut pass_node = PassNode::<&FirstPass>::new(PassDescriptor {
+        let mut pass_node = PassNode::<&PostPass>::new(PassDescriptor {
             color_attachments: vec![RenderPassColorAttachmentDescriptor {
                 attachment: TextureAttachment::Input("color_attachment".to_string()),
                 resolve_target: None,
@@ -49,13 +49,13 @@ impl RenderToTextureGraphBuilder for RenderGraph {
             }),
             sample_count: 1,
         });
-        pass_node.add_camera(FIRST_PASS_CAMERA);
+        pass_node.add_camera(POST_PASS_CAMERA);
 
-        self.add_node(FIRST_PASS, pass_node);
-        self.add_system_node(FIRST_PASS_CAMERA, CameraNode::new(FIRST_PASS_CAMERA));
+        self.add_node(POST_PASS, pass_node);
+        self.add_system_node(POST_PASS_CAMERA, CameraNode::new(POST_PASS_CAMERA));
 
-        active_cameras.add(FIRST_PASS_CAMERA);
-        self.add_node_edge(FIRST_PASS_CAMERA, FIRST_PASS).unwrap();
+        active_cameras.add(POST_PASS_CAMERA);
+        self.add_node_edge(POST_PASS_CAMERA, POST_PASS).unwrap();
 
         self.add_node(
             TEXTURE_NODE,
@@ -100,24 +100,24 @@ impl RenderToTextureGraphBuilder for RenderGraph {
         self.add_slot_edge(DEPTH_TEXTURE_NODE, TextureNode::TEXTURE, MAIN_PASS, "depth")
             .unwrap();
 
-        self.add_node_edge(MAIN_PASS, FIRST_PASS).unwrap();
+        self.add_node_edge(MAIN_PASS, POST_PASS).unwrap();
         self.add_slot_edge(
             bevy::render::render_graph::base::node::PRIMARY_SWAP_CHAIN,
             bevy::render::render_graph::WindowSwapChainNode::OUT_TEXTURE,
-            FIRST_PASS,
+            POST_PASS,
             "color_attachment",
         )
         .unwrap();
         self.add_slot_edge(
             bevy::render::render_graph::base::node::MAIN_DEPTH_TEXTURE,
             bevy::render::render_graph::WindowTextureNode::OUT_TEXTURE,
-            FIRST_PASS,
+            POST_PASS,
             "depth",
         )
         .unwrap();
-        // self.add_node_edge("transform", FIRST_PASS).unwrap();
+        // self.add_node_edge("transform", POST_PASS).unwrap();
 
-        self.add_node_edge(FIRST_PASS, "ui_pass").unwrap();
+        self.add_node_edge(POST_PASS, "ui_pass").unwrap();
         self
     }
 }

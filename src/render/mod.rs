@@ -39,21 +39,21 @@ pub fn setup_final_pass(
     let mut cam_trans = Transform::default();
     cam_trans.rotate(Quat::from_rotation_x(std::f32::consts::PI));
     // camera
-    let mut first_pass_camera = OrthographicCameraBundle {
+    let mut post_pass_camera = OrthographicCameraBundle {
         camera: Camera {
-            name: Some(FIRST_PASS_CAMERA.to_string()),
+            name: Some(POST_PASS_CAMERA.to_string()),
             window: WindowId::new(),
             ..Default::default()
         },
         transform: cam_trans,
         ..OrthographicCameraBundle::new_2d()
     };
-    let camera_projection = &mut first_pass_camera.orthographic_projection;
+    let camera_projection = &mut post_pass_camera.orthographic_projection;
     camera_projection.update(1280.0, 720.0);
-    first_pass_camera.camera.projection_matrix = camera_projection.get_projection_matrix();
-    first_pass_camera.camera.depth_calculation = camera_projection.depth_calculation();
+    post_pass_camera.camera.projection_matrix = camera_projection.get_projection_matrix();
+    post_pass_camera.camera.depth_calculation = camera_projection.depth_calculation();
 
-    commands.spawn(first_pass_camera);
+    commands.spawn(post_pass_camera);
 
     let pipeline_handle = pipelines.add(build_sprite_pipeline(ShaderStages {
         vertex: shaders.add(Shader::from_glsl(
@@ -79,7 +79,7 @@ pub fn setup_final_pass(
             )]),
             ..Default::default()
         })
-        .with(FirstPass);
+        .with(PostPass);
     commands.remove_one::<MainPass>(commands.current_entity().unwrap());
 }
 
