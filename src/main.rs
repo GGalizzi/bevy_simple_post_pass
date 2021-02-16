@@ -87,7 +87,7 @@ fn setup(
 
     let atlas_texture_handle: Handle<Texture> = asset_server.load("textures/atlas.png");
     let texture_atlas =
-        TextureAtlas::from_grid(atlas_texture_handle.clone(), Vec2::new(24.0, 24.0), 19, 19);
+        TextureAtlas::from_grid(atlas_texture_handle, Vec2::new(24.0, 24.0), 19, 19);
     let atlas_handle = texture_atlases.add(texture_atlas);
 
     // add entities to the world

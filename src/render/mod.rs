@@ -72,7 +72,7 @@ pub fn setup_final_pass(
                 size: Vec2::new(1280., 720.),
                 ..Default::default()
             },
-            material: color_materials.add(texture_handle.clone().into()),
+            material: color_materials.add(texture_handle.into()),
             transform: Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
             render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
                 pipeline_handle,
