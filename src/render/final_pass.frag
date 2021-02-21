@@ -18,10 +18,14 @@ void main() {
     vec4 sampled_color = texture(
         sampler2D(ColorMaterial_texture, ColorMaterial_texture_sampler),
         v_Uv);
+    
+    if (sampled_color == vec4(0.0,0.0,1.0,1.0)) {
+        sampled_color = vec4(0.25,0.1,0.1, 0.9);
+    }
 
     float rem = mod(gl_FragCoord.y, 5.0);
     if (rem >= 0.0 && rem <= 1.1) {
-        sampled_color += vec4(0.001, 0.001, 0.001, 0.0);
+        sampled_color += vec4(0.0012, 0.001, 0.0015, 0.0);
     }
 
     color *= sampled_color;
